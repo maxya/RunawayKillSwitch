@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // CircuitBreaker evaluates each request against configured spend and loop limits
@@ -56,8 +57,10 @@ func (cb *CircuitBreaker) PostResponseRecord(ctx context.Context, model string, 
 		return false, "", fmt.Errorf("record spend: %w", err)
 	}
 
-	minuteSpend, err := cb.store.GetSlidingWindowSpend(ctx, 1)
-	if err == nil && minuteSpend > cb.config.Limits.MaxSpendPerMinuteUSD {
+	minuteSpend, err := cb.store.GetSlidingWindowSpend(ctx, 2)
+	if err != nil {
+		slog.Warn("minute velocity check skipped, failing open", "error", err)
+	} else if minuteSpend > cb.config.Limits.MaxSpendPerMinuteUSD {
 		reason = fmt.Sprintf("Velocity limit: $%.4f/min exceeds limit of $%.2f/min", minuteSpend, cb.config.Limits.MaxSpendPerMinuteUSD)
 		if triggerErr := cb.store.TriggerCircuitBreaker(ctx, reason); triggerErr != nil {
 			return false, "", triggerErr
@@ -66,7 +69,9 @@ func (cb *CircuitBreaker) PostResponseRecord(ctx context.Context, model string, 
 	}
 
 	hourSpend, err := cb.store.GetHourlySpend(ctx)
-	if err == nil && hourSpend > cb.config.Limits.MaxSpendPerHourUSD {
+	if err != nil {
+		slog.Warn("hourly velocity check skipped, failing open", "error", err)
+	} else if hourSpend > cb.config.Limits.MaxSpendPerHourUSD {
 		reason = fmt.Sprintf("Hourly limit: $%.4f exceeds limit of $%.2f", hourSpend, cb.config.Limits.MaxSpendPerHourUSD)
 		if triggerErr := cb.store.TriggerCircuitBreaker(ctx, reason); triggerErr != nil {
 			return false, "", triggerErr

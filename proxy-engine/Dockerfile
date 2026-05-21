@@ -5,12 +5,10 @@ WORKDIR /app
 # git required for go module downloads from VCS
 RUN apk add --no-cache git ca-certificates
 
-# Copy go.mod first. go.sum may not exist yet — go mod tidy generates it.
-COPY go.mod ./
-COPY . .
+COPY go.mod go.sum ./
+RUN go mod download -x
 
-# go mod tidy downloads all dependencies and generates go.sum if missing
-RUN go mod tidy
+COPY . .
 
 # Build a statically linked binary with debug symbols stripped
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o killswitch-proxy .
@@ -25,5 +23,8 @@ WORKDIR /app
 COPY --from=builder /app/killswitch-proxy .
 
 EXPOSE 8530 8531
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://localhost:8531/api/status > /dev/null || exit 1
 
 CMD ["./killswitch-proxy"]

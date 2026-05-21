@@ -1,4 +1,4 @@
-.PHONY: build up down restart logs clean test test-unit test-integration test-coverage vet lint status reset
+.PHONY: build up down restart logs clean test test-unit test-integration test-coverage vet lint ci status reset
 
 # Docker Compose targets
 
@@ -46,6 +46,11 @@ test-coverage:
 
 vet:
 	cd proxy-engine && go vet ./...
+
+lint:
+	cd proxy-engine && golangci-lint run ./...
+
+ci: vet lint test-unit
 
 # Clean build artifacts
 

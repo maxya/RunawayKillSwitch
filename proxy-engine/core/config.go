@@ -1,7 +1,10 @@
 package core
 
 import (
+	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -63,11 +66,11 @@ type ProviderConfig struct {
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 	if cfg.PricingMatrix.DefaultInputCostPerM == 0 {
 		cfg.PricingMatrix.DefaultInputCostPerM = 3.00
@@ -78,13 +81,33 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Limits.MaxConsecutiveIdenticalPrompts == 0 {
 		cfg.Limits.MaxConsecutiveIdenticalPrompts = 4
 	}
+	// 0.0 means "not set"; use safe defaults to prevent hair-trigger trips on blank config.
+	if cfg.Limits.MaxSpendPerMinuteUSD == 0 {
+		cfg.Limits.MaxSpendPerMinuteUSD = 5.00
+	}
+	if cfg.Limits.MaxSpendPerHourUSD == 0 {
+		cfg.Limits.MaxSpendPerHourUSD = 20.00
+	}
 	return &cfg, nil
 }
 
-// GetModelPricing returns pricing for the given model name, falling back to defaults when not found.
-func (c *Config) GetModelPricing(model string) ModelPricing {
+// ModelPricing returns pricing for the given model name.
+// Tries exact match first, then longest-prefix match, then falls back to defaults.
+func (c *Config) ModelPricing(model string) ModelPricing {
 	if pricing, ok := c.PricingMatrix.Models[model]; ok {
 		return pricing
+	}
+	// Prefix fallback — sort longest key first to prevent a short key eating a longer match
+	// (e.g., "claude-sonnet" must not match before "claude-sonnet-4-6").
+	keys := make([]string, 0, len(c.PricingMatrix.Models))
+	for k := range c.PricingMatrix.Models {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, key := range keys {
+		if strings.HasPrefix(model, key) {
+			return c.PricingMatrix.Models[key]
+		}
 	}
 	return ModelPricing{
 		InputCostPerM:  c.PricingMatrix.DefaultInputCostPerM,

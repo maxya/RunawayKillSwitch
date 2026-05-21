@@ -1,7 +1,9 @@
 limits:
-  # Circuit breaker trips if spend in the last 60 seconds exceeds this value
+  # Trip if spend in the last ~60 seconds exceeds this value.
+  # Omitting or setting to 0 uses the default of $5.00/min.
   max_spend_per_minute_usd: 1.50
-  # Circuit breaker trips if spend in the last hour exceeds this value
+  # Trip if spend in the last hour exceeds this value.
+  # Omitting or setting to 0 uses the default of $20.00/hr.
   max_spend_per_hour_usd: 12.00
   # Circuit breaker trips if this many consecutive requests have identical prompt hashes
   max_consecutive_identical_prompts: 4
@@ -12,9 +14,16 @@ pricing_matrix:
   default_output_cost_per_m: 15.00
   models:
     # Anthropic Claude 4 (2026 pricing)
+    # Full versioned IDs as returned by the API; prefix fallback handles shorthand aliases.
     claude-opus-4-20250514:
       input_cost_per_m: 5.00
       output_cost_per_m: 25.00
+    claude-opus-4:
+      input_cost_per_m: 5.00
+      output_cost_per_m: 25.00
+    claude-sonnet-4-6:
+      input_cost_per_m: 3.00
+      output_cost_per_m: 15.00
     claude-sonnet-4-5:
       input_cost_per_m: 3.00
       output_cost_per_m: 15.00

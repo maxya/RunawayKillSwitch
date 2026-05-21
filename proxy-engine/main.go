@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -12,7 +13,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/runaway-killswitch/proxy-engine/core"
@@ -20,6 +24,9 @@ import (
 
 //go:embed ui/embedded_dashboard.html
 var dashboardHTML []byte
+
+// webhookClient is used exclusively for circuit breaker notifications.
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
 
 // httpClient is shared across all proxy requests with a generous timeout for LLM responses.
 var httpClient = &http.Client{
@@ -78,19 +85,53 @@ func main() {
 	adminMux.HandleFunc("/api/status", srv.handleAPIStatus)
 	adminMux.HandleFunc("/api/reset", srv.handleAPIReset)
 
+	adminServer := &http.Server{
+		Addr:              ":8531",
+		Handler:           adminMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	proxyServer := &http.Server{
+		Addr:    ":8530",
+		Handler: proxyMux,
+		// ReadHeaderTimeout guards against Slowloris; no ReadTimeout/WriteTimeout because
+		// LLM responses can stream for minutes.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	go func() {
-		slog.Info("Admin UI listening on :8531")
-		if err := http.ListenAndServe(":8531", adminMux); err != nil {
-			slog.Error("Admin server crashed", "error", err)
+		slog.Info("admin UI listening", "addr", adminServer.Addr)
+		if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("admin server crashed", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	slog.Info("RunawayKillSwitch proxy listening on :8530")
-	if err := http.ListenAndServe(":8530", proxyMux); err != nil {
-		slog.Error("Proxy engine crashed", "error", err)
-		os.Exit(1)
+	go func() {
+		slog.Info("proxy listening", "addr", proxyServer.Addr)
+		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("proxy engine crashed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("shutdown signal received, draining connections")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := proxyServer.Shutdown(shutCtx); err != nil {
+		slog.Error("proxy server shutdown error", "error", err)
 	}
+	if err := adminServer.Shutdown(shutCtx); err != nil {
+		slog.Error("admin server shutdown error", "error", err)
+	}
+	slog.Info("shutdown complete")
 }
 
 // handleAnthropic handles POST /v1/messages and routes to api.anthropic.com.
@@ -100,9 +141,10 @@ func (s *ProxyServer) handleAnthropic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB limit
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
 		return
 	}
 	r.Body.Close()
@@ -146,20 +188,20 @@ func (s *ProxyServer) handleOpenAICompat(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB limit
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
 		return
 	}
 	r.Body.Close()
 
 	model := extractModel(bodyBytes)
+	promptHash := computePromptHash(bodyBytes)
 	targetBaseURL, provider := s.resolveOpenAITarget(model)
 
 	// Inject stream_options so OpenAI returns token counts in the final SSE chunk.
 	bodyBytes = injectStreamOptions(bodyBytes)
-
-	promptHash := computePromptHash(bodyBytes)
 	ctx := r.Context()
 
 	blocked, reason, err := s.breaker.PreRequestCheck(ctx, promptHash)
@@ -216,7 +258,18 @@ func (s *ProxyServer) forwardRequest(w http.ResponseWriter, r *http.Request, bod
 	}
 	defer resp.Body.Close()
 
+	hopByHop := map[string]bool{
+		"Transfer-Encoding": true,
+		"Trailer":           true,
+		"Keep-Alive":        true,
+		"Proxy-Connection":  true,
+		"Upgrade":           true,
+		"Connection":        true,
+	}
 	for k, vs := range resp.Header {
+		if hopByHop[http.CanonicalHeaderKey(k)] {
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
@@ -224,7 +277,9 @@ func (s *ProxyServer) forwardRequest(w http.ResponseWriter, r *http.Request, bod
 	w.WriteHeader(resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
-		io.Copy(w, resp.Body)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			slog.Warn("error copying upstream error response", "error", err)
+		}
 		return
 	}
 
@@ -234,7 +289,9 @@ func (s *ProxyServer) forwardRequest(w http.ResponseWriter, r *http.Request, bod
 	} else {
 		fullBody, _ := io.ReadAll(resp.Body)
 		inputTokens, outputTokens = core.ParseNonStreamingTokens(fullBody, provider)
-		w.Write(fullBody)
+		if _, err := w.Write(fullBody); err != nil {
+			slog.Warn("error writing response body to client", "error", err)
+		}
 	}
 	return
 }
@@ -248,7 +305,10 @@ func streamAndCapture(w http.ResponseWriter, body io.Reader, provider string) (i
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			w.Write(line)
+			if _, werr := w.Write(line); werr != nil {
+				slog.Warn("error writing SSE line to client", "error", werr)
+				break
+			}
 			if canFlush {
 				flusher.Flush()
 			}
@@ -278,9 +338,17 @@ func streamAndCapture(w http.ResponseWriter, body io.Reader, provider string) (i
 func (s *ProxyServer) resolveOpenAITarget(model string) (baseURL string, provider string) {
 	lower := strings.ToLower(model)
 
-	for prefix, provCfg := range s.config.Routing.Providers {
+	// Sort longest prefix first for deterministic matching; prevents a short key eating a longer match.
+	providerKeys := make([]string, 0, len(s.config.Routing.Providers))
+	for k := range s.config.Routing.Providers {
+		providerKeys = append(providerKeys, k)
+	}
+	sort.Slice(providerKeys, func(i, j int) bool {
+		return len(providerKeys[i]) > len(providerKeys[j])
+	})
+	for _, prefix := range providerKeys {
 		if strings.HasPrefix(lower, strings.ToLower(prefix)) {
-			return provCfg.BaseURL, prefix
+			return s.config.Routing.Providers[prefix].BaseURL, prefix
 		}
 	}
 
@@ -312,6 +380,10 @@ func (s *ProxyServer) serveUI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *ProxyServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	summary, err := s.metrics.GetMetricsSummary(r.Context())
@@ -356,7 +428,7 @@ func (s *ProxyServer) fireWebhook(reason string) {
 			reason, time.Now().Format(time.RFC3339)),
 	}
 	data, _ := json.Marshal(payload)
-	resp, err := http.Post(s.config.Notifications.Webhook.URL, "application/json", bytes.NewReader(data))
+	resp, err := webhookClient.Post(s.config.Notifications.Webhook.URL, "application/json", bytes.NewReader(data))
 	if err != nil {
 		slog.Error("webhook delivery failed", "error", err)
 		return
@@ -386,6 +458,8 @@ func computePromptHash(body []byte) string {
 	var req struct {
 		Messages json.RawMessage `json:"messages"`
 	}
+	// len > 2 is a byte-length guard: an empty messages array "[]" is exactly 2 bytes.
+	// Any non-empty messages array is longer, so this check means "has at least one message".
 	if err := json.Unmarshal(body, &req); err == nil && len(req.Messages) > 2 {
 		h := sha256.Sum256(req.Messages)
 		return hex.EncodeToString(h[:])
@@ -430,7 +504,19 @@ func injectStreamOptions(bodyBytes []byte) []byte {
 	if err := json.Unmarshal(streamVal, &isStream); err != nil || !isStream {
 		return bodyBytes
 	}
-	req["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+	// Merge include_usage into stream_options without destroying other fields.
+	if existing, has := req["stream_options"]; has {
+		var opts map[string]json.RawMessage
+		if json.Unmarshal(existing, &opts) == nil {
+			opts["include_usage"] = json.RawMessage("true")
+			if merged, err := json.Marshal(opts); err == nil {
+				req["stream_options"] = merged
+			}
+		}
+		// If unmarshal fails, fall through and set the whole object.
+	} else {
+		req["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+	}
 	modified, err := json.Marshal(req)
 	if err != nil {
 		return bodyBytes

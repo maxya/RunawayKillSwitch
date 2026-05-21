@@ -77,7 +77,7 @@ func (s *RedisMetricsStore) ResetCircuitBreaker(ctx context.Context) error {
 // RecordSpend stores cost atomically using integer microdollars (cost * 1_000_000)
 // to enable atomic INCRBY operations without floating-point race conditions.
 func (s *RedisMetricsStore) RecordSpend(ctx context.Context, model string, inputTokens, outputTokens int64) (float64, error) {
-	pricing := s.config.GetModelPricing(model)
+	pricing := s.config.ModelPricing(model)
 	cost := (float64(inputTokens)*pricing.InputCostPerM + float64(outputTokens)*pricing.OutputCostPerM) / 1_000_000
 	costMicro := int64(cost * 1_000_000)
 
@@ -163,9 +163,23 @@ func (s *RedisMetricsStore) CheckAndPushPromptHash(ctx context.Context, hash str
 	return true, nil
 }
 
+// MetricsSummary is a point-in-time snapshot of proxy metrics for the admin dashboard.
+type MetricsSummary struct {
+	Locked         bool    `json:"locked"`
+	LockReason     string  `json:"lock_reason"`
+	SpendLast1Min  float64 `json:"spend_last_1min"`
+	SpendLast5Min  float64 `json:"spend_last_5min"`
+	SpendLastHour  float64 `json:"spend_last_hour"`
+	SpendTotal     float64 `json:"spend_total"`
+	RequestCount   int64   `json:"request_count"`
+	LastModel      string  `json:"last_model"`
+	LimitPerMinute float64 `json:"limit_per_minute"`
+	LimitPerHour   float64 `json:"limit_per_hour"`
+}
+
 // GetMetricsSummary returns a complete snapshot of current metrics for the dashboard and API.
-func (s *RedisMetricsStore) GetMetricsSummary(ctx context.Context) (map[string]interface{}, error) {
-	minuteSpend, _ := s.GetSlidingWindowSpend(ctx, 1)
+func (s *RedisMetricsStore) GetMetricsSummary(ctx context.Context) (*MetricsSummary, error) {
+	minuteSpend, _ := s.GetSlidingWindowSpend(ctx, 2)
 	fiveMinSpend, _ := s.GetSlidingWindowSpend(ctx, 5)
 	hourSpend, _ := s.GetHourlySpend(ctx)
 	totalSpend, _ := s.client.Get(ctx, totalSpendKey).Float64()
@@ -175,16 +189,16 @@ func (s *RedisMetricsStore) GetMetricsSummary(ctx context.Context) (map[string]i
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{
-		"locked":           locked,
-		"lock_reason":      reason,
-		"spend_last_1min":  minuteSpend,
-		"spend_last_5min":  fiveMinSpend,
-		"spend_last_hour":  hourSpend,
-		"spend_total":      totalSpend,
-		"request_count":    reqCount,
-		"last_model":       lastModel,
-		"limit_per_minute": s.config.Limits.MaxSpendPerMinuteUSD,
-		"limit_per_hour":   s.config.Limits.MaxSpendPerHourUSD,
+	return &MetricsSummary{
+		Locked:         locked,
+		LockReason:     reason,
+		SpendLast1Min:  minuteSpend,
+		SpendLast5Min:  fiveMinSpend,
+		SpendLastHour:  hourSpend,
+		SpendTotal:     totalSpend,
+		RequestCount:   reqCount,
+		LastModel:      lastModel,
+		LimitPerMinute: s.config.Limits.MaxSpendPerMinuteUSD,
+		LimitPerHour:   s.config.Limits.MaxSpendPerHourUSD,
 	}, nil
 }

@@ -9,3 +9,6 @@ docs/
 *.md
 *.log
 .DS_Store
+*_test.go
+coverage.out
+*.cover

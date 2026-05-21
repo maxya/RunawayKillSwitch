@@ -1,5 +1,4 @@
 # Go
-proxy-engine/go.sum
 proxy-engine/killswitch-proxy
 *.exe
 *.exe~
