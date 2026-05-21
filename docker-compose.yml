@@ -1,0 +1,38 @@
+---
+
+services:
+  proxy-engine:
+    build:
+      context: ./proxy-engine
+      dockerfile: Dockerfile
+    container_name: killswitch-engine
+    ports:
+      - "8530:8530"
+      - "8531:8531"
+    environment:
+      - REDIS_URL=redis://state-db:6379/0
+      - CONFIG_PATH=/app/config/killswitch.yaml
+    volumes:
+      - ./config:/app/config
+    depends_on:
+      state-db:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    restart: unless-stopped
+
+  state-db:
+    image: redis:7.2-alpine
+    container_name: killswitch-db
+    command: redis-server --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped

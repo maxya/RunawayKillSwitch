@@ -1,0 +1,33 @@
+# Go
+proxy-engine/go.sum
+proxy-engine/killswitch-proxy
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+proxy-engine/*.test
+
+# Coverage
+coverage.out
+*.cover
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.network-request
+*.network-response
+
+# Logs
+*.log

@@ -1,0 +1,73 @@
+limits:
+  # Circuit breaker trips if spend in the last 60 seconds exceeds this value
+  max_spend_per_minute_usd: 1.50
+  # Circuit breaker trips if spend in the last hour exceeds this value
+  max_spend_per_hour_usd: 12.00
+  # Circuit breaker trips if this many consecutive requests have identical prompt hashes
+  max_consecutive_identical_prompts: 4
+
+pricing_matrix:
+  # Fallback pricing when model is not found in the models map below
+  default_input_cost_per_m: 3.00
+  default_output_cost_per_m: 15.00
+  models:
+    # Anthropic Claude 4 (2026 pricing)
+    claude-opus-4-20250514:
+      input_cost_per_m: 5.00
+      output_cost_per_m: 25.00
+    claude-sonnet-4-5:
+      input_cost_per_m: 3.00
+      output_cost_per_m: 15.00
+    claude-haiku-4-5:
+      input_cost_per_m: 1.00
+      output_cost_per_m: 5.00
+    # Anthropic Claude 3.x (legacy)
+    claude-3-5-sonnet-20241022:
+      input_cost_per_m: 3.00
+      output_cost_per_m: 15.00
+    claude-3-5-haiku-20241022:
+      input_cost_per_m: 0.80
+      output_cost_per_m: 4.00
+    claude-3-opus-20240229:
+      input_cost_per_m: 15.00
+      output_cost_per_m: 75.00
+    # OpenAI
+    gpt-4o:
+      input_cost_per_m: 2.50
+      output_cost_per_m: 10.00
+    gpt-4o-mini:
+      input_cost_per_m: 0.15
+      output_cost_per_m: 0.60
+    o1:
+      input_cost_per_m: 15.00
+      output_cost_per_m: 60.00
+    o3-mini:
+      input_cost_per_m: 1.10
+      output_cost_per_m: 4.40
+    # DeepSeek
+    deepseek-chat:
+      input_cost_per_m: 0.21
+      output_cost_per_m: 0.79
+    deepseek-coder:
+      input_cost_per_m: 0.14
+      output_cost_per_m: 0.28
+
+routing:
+  # When a model name does not match any prefix rule, route to this provider
+  default_openai_provider: openai
+  providers:
+    openai:
+      base_url: "https://api.openai.com"
+    deepseek:
+      base_url: "https://api.deepseek.com"
+    openrouter:
+      base_url: "https://openrouter.ai/api"
+
+notifications:
+  # Print ASCII bell character to proxy-engine container stdout when breaker trips
+  system_bell: true
+  webhook:
+    # Set enabled: true and provide a Discord/Slack webhook URL to receive alerts
+    enabled: false
+    url: ""
+    format: "json_summary"

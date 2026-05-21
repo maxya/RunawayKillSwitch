@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RunawayKillSwitch — Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; padding: 28px 24px; }
+    h1 { font-size: 20px; font-weight: 600; color: #e6edf3; margin-bottom: 4px; letter-spacing: -0.3px; }
+    .subtitle { font-size: 13px; color: #6e7681; margin-bottom: 28px; }
+
+    .banner {
+      padding: 16px 20px; border-radius: 8px; margin-bottom: 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      border: 1px solid transparent; transition: border-color 0.3s;
+    }
+    .banner.ok   { background: #0d2818; border-color: #238636; }
+    .banner.trip { background: #2d1a1a; border-color: #da3633; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { border-color: #da3633; } 50% { border-color: #ff6b6b; } }
+
+    .dot { width: 11px; height: 11px; border-radius: 50%; margin-right: 10px; flex-shrink: 0; }
+    .dot.ok   { background: #3fb950; }
+    .dot.trip { background: #f85149; }
+    .banner-left { display: flex; align-items: flex-start; gap: 0; }
+    .banner-inner { display: flex; align-items: center; }
+    .status-text { font-size: 14px; font-weight: 600; color: #e6edf3; }
+    .status-reason { font-size: 12px; color: #8b949e; margin-top: 5px; max-width: 520px; word-break: break-word; }
+
+    button {
+      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+      padding: 8px 16px; border-radius: 6px; cursor: pointer;
+      font-size: 13px; font-weight: 500; white-space: nowrap;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover { background: #30363d; border-color: #8b949e; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.reset { border-color: #6e4040; color: #f0a0a0; }
+    button.reset:hover:not(:disabled) { background: #2d1a1a; border-color: #f85149; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+    .card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #6e7681; margin-bottom: 8px; }
+    .card-value { font-size: 26px; font-weight: 700; color: #e6edf3; font-variant-numeric: tabular-nums; transition: color 0.3s; }
+    .card-value.warn { color: #d29922; }
+    .card-value.crit { color: #f85149; }
+    .card-sub { font-size: 11px; color: #6e7681; margin-top: 5px; }
+
+    .limits-box { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+    .limits-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #6e7681; margin-bottom: 14px; }
+    .limit-row { margin-bottom: 14px; }
+    .limit-row:last-child { margin-bottom: 0; }
+    .limit-header { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; color: #8b949e; }
+    .bar-bg { background: #21262d; border-radius: 3px; height: 5px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.3s; }
+    .bar-fill.ok   { background: #238636; }
+    .bar-fill.warn { background: #d29922; }
+    .bar-fill.crit { background: #da3633; }
+
+    .meta-row { display: flex; gap: 20px; font-size: 12px; color: #8b949e; }
+    .meta-val { color: #c9d1d9; }
+
+    .footer { margin-top: 28px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #6e7681; }
+    .live { display: flex; align-items: center; gap: 5px; }
+    .live-dot { width: 6px; height: 6px; background: #3fb950; border-radius: 50%; animation: blink 2s infinite; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+  </style>
+</head>
+<body>
+  <h1>RunawayKillSwitch</h1>
+  <p class="subtitle">Token Burn Rate Monitor — Network-Layer Circuit Breaker</p>
+
+  <div id="banner" class="banner ok">
+    <div class="banner-left">
+      <div style="padding-top:3px"><span id="dot" class="dot ok"></span></div>
+      <div>
+        <div class="banner-inner"><span id="status-text" class="status-text">Connecting...</span></div>
+        <div id="status-reason" class="status-reason"></div>
+      </div>
+    </div>
+    <button id="reset-btn" class="reset" onclick="resetBreaker()">Reset Circuit Breaker</button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Last 1 Min</div>
+      <div id="s1" class="card-value">—</div>
+      <div id="l1" class="card-sub">limit —</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Last 5 Min</div>
+      <div id="s5" class="card-value">—</div>
+      <div class="card-sub">rolling window</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Last Hour</div>
+      <div id="sh" class="card-value">—</div>
+      <div id="lh" class="card-sub">limit —</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Spend</div>
+      <div id="st" class="card-value">—</div>
+      <div class="card-sub">since last reset</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Requests</div>
+      <div id="rc" class="card-value">—</div>
+      <div class="card-sub">intercepted</div>
+    </div>
+  </div>
+
+  <div class="limits-box">
+    <div class="limits-title">Velocity Limits</div>
+    <div class="limit-row">
+      <div class="limit-header"><span>Per-minute spend</span><span id="pct1">—</span></div>
+      <div class="bar-bg"><div id="bar1" class="bar-fill ok" style="width:0%"></div></div>
+    </div>
+    <div class="limit-row">
+      <div class="limit-header"><span>Hourly spend</span><span id="pctH">—</span></div>
+      <div class="bar-bg"><div id="barH" class="bar-fill ok" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="meta-row">
+    <span>Last model: <span id="lm" class="meta-val">—</span></span>
+  </div>
+
+  <div class="footer">
+    <div class="live"><span class="live-dot"></span> Refreshing every 3s</div>
+    <div id="ts">—</div>
+  </div>
+
+  <script>
+    function fmt(v) { return v != null ? '$' + Number(v).toFixed(4) : '—'; }
+    function cls(v, limit) {
+      if (!limit || limit === 0) return '';
+      const p = v / limit;
+      if (p >= 0.9) return 'crit';
+      if (p >= 0.7) return 'warn';
+      return '';
+    }
+    function barCls(v, limit) {
+      if (!limit || limit === 0) return 'ok';
+      const p = v / limit;
+      if (p >= 0.9) return 'crit';
+      if (p >= 0.7) return 'warn';
+      return 'ok';
+    }
+    function setBar(barId, pctId, v, limit) {
+      const pct = limit > 0 ? Math.min((v / limit) * 100, 100) : 0;
+      document.getElementById(barId).style.width = pct.toFixed(1) + '%';
+      document.getElementById(barId).className = 'bar-fill ' + barCls(v, limit);
+      document.getElementById(pctId).textContent = fmt(v) + ' / ' + fmt(limit);
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch('/api/status');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const locked = d.locked === true;
+        const banner = document.getElementById('banner');
+        banner.className = 'banner ' + (locked ? 'trip' : 'ok');
+        document.getElementById('dot').className = 'dot ' + (locked ? 'trip' : 'ok');
+        document.getElementById('status-text').textContent = locked
+          ? '🔴  CIRCUIT BREAKER ACTIVE — All AI requests are blocked'
+          : '🟢  Proxy Online — Monitoring active';
+        document.getElementById('status-reason').textContent = locked ? (d.lock_reason || '') : '';
+
+        const s1 = d.spend_last_1min || 0, lm = d.limit_per_minute || 0;
+        const sh = d.spend_last_hour || 0, lh = d.limit_per_hour || 0;
+
+        document.getElementById('s1').textContent = fmt(s1);
+        document.getElementById('s1').className = 'card-value ' + cls(s1, lm);
+        document.getElementById('l1').textContent = 'limit ' + fmt(lm);
+        document.getElementById('s5').textContent = fmt(d.spend_last_5min);
+        document.getElementById('sh').textContent = fmt(sh);
+        document.getElementById('sh').className = 'card-value ' + cls(sh, lh);
+        document.getElementById('lh').textContent = 'limit ' + fmt(lh);
+        document.getElementById('st').textContent = fmt(d.spend_total);
+        document.getElementById('rc').textContent = d.request_count || 0;
+        document.getElementById('lm').textContent = d.last_model || '—';
+        setBar('bar1', 'pct1', s1, lm);
+        setBar('barH', 'pctH', sh, lh);
+        document.getElementById('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      } catch (e) {
+        document.getElementById('status-text').textContent = '⚠  Cannot reach proxy — is the stack running?';
+        document.getElementById('status-reason').textContent = e.message;
+        document.getElementById('banner').className = 'banner trip';
+      }
+    }
+
+    async function resetBreaker() {
+      const btn = document.getElementById('reset-btn');
+      btn.disabled = true;
+      btn.textContent = 'Resetting...';
+      try {
+        const r = await fetch('/api/reset', { method: 'POST' });
+        const d = await r.json();
+        btn.textContent = '✓ Reset';
+        setTimeout(() => { btn.textContent = 'Reset Circuit Breaker'; btn.disabled = false; }, 2500);
+        poll();
+      } catch (e) {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+      }
+    }
+
+    poll();
+    setInterval(poll, 3000);
+  </script>
+</body>
+</html>
