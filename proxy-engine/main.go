@@ -287,7 +287,10 @@ func (s *ProxyServer) forwardRequest(w http.ResponseWriter, r *http.Request, bod
 	if isSSE {
 		inputTokens, outputTokens = streamAndCapture(w, resp.Body, provider)
 	} else {
-		fullBody, _ := io.ReadAll(resp.Body)
+		fullBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			slog.Warn("error reading upstream response body", "error", err)
+		}
 		inputTokens, outputTokens = core.ParseNonStreamingTokens(fullBody, provider)
 		if _, err := w.Write(fullBody); err != nil {
 			slog.Warn("error writing response body to client", "error", err)

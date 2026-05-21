@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -178,13 +179,33 @@ type MetricsSummary struct {
 }
 
 // GetMetricsSummary returns a complete snapshot of current metrics for the dashboard and API.
+// Spend query errors are logged and treated as zero (fail open) so the dashboard always renders;
+// only a lock-check failure is fatal because it controls request blocking decisions.
 func (s *RedisMetricsStore) GetMetricsSummary(ctx context.Context) (*MetricsSummary, error) {
-	minuteSpend, _ := s.GetSlidingWindowSpend(ctx, 2)
-	fiveMinSpend, _ := s.GetSlidingWindowSpend(ctx, 5)
-	hourSpend, _ := s.GetHourlySpend(ctx)
-	totalSpend, _ := s.client.Get(ctx, totalSpendKey).Float64()
-	reqCount, _ := s.client.Get(ctx, requestCountKey).Int64()
-	lastModel, _ := s.client.Get(ctx, lastModelKey).Result()
+	minuteSpend, err := s.GetSlidingWindowSpend(ctx, 2)
+	if err != nil {
+		slog.Warn("metrics: minute spend unavailable", "error", err)
+	}
+	fiveMinSpend, err := s.GetSlidingWindowSpend(ctx, 5)
+	if err != nil {
+		slog.Warn("metrics: 5min spend unavailable", "error", err)
+	}
+	hourSpend, err := s.GetHourlySpend(ctx)
+	if err != nil {
+		slog.Warn("metrics: hourly spend unavailable", "error", err)
+	}
+	totalSpend, err := s.client.Get(ctx, totalSpendKey).Float64()
+	if err != nil && err != redis.Nil {
+		slog.Warn("metrics: total spend unavailable", "error", err)
+	}
+	reqCount, err := s.client.Get(ctx, requestCountKey).Int64()
+	if err != nil && err != redis.Nil {
+		slog.Warn("metrics: request count unavailable", "error", err)
+	}
+	lastModel, err := s.client.Get(ctx, lastModelKey).Result()
+	if err != nil && err != redis.Nil {
+		slog.Warn("metrics: last model unavailable", "error", err)
+	}
 	locked, reason, err := s.IsLocked(ctx)
 	if err != nil {
 		return nil, err
