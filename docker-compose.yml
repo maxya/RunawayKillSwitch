@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   state-db:
-    image: redis:7.2-alpine
+    image: redis:8-alpine
     container_name: killswitch-db
     command: redis-server --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru
     ports:
