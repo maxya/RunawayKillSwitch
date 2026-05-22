@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build, Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: proxy-engine/go.sum
+
+      - name: Download dependencies
+        run: cd proxy-engine && go mod download
+
+      - name: go vet
+        run: cd proxy-engine && go vet ./...
+
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: golangci-lint
+        run: cd proxy-engine && golangci-lint run ./...
+
+      - name: Run unit tests
+        run: cd proxy-engine && go test -race ./... -v
+
+      - name: Run integration tests
+        run: cd proxy-engine && go test -tags integration -race ./core/... -v -timeout 120s
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker compose build

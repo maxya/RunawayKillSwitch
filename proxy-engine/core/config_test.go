@@ -34,7 +34,7 @@ notifications:
     url: ""
     format: "json_summary"
 `
-		if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -69,7 +69,7 @@ notifications:
 	t.Run("malformed YAML returns error", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "bad.yaml")
-		if err := os.WriteFile(path, []byte(`{invalid: yaml: : :`), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(`{invalid: yaml: : :`), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		_, err := LoadConfig(path)
@@ -85,7 +85,7 @@ notifications:
 limits: {}
 pricing_matrix: {}
 `
-		if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 			t.Fatal(err)
 		}
 
@@ -113,7 +113,7 @@ pricing_matrix: {}
 	t.Run("empty file uses all defaults", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "empty.yaml")
-		if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
 			t.Fatal(err)
 		}
 

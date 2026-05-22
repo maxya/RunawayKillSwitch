@@ -263,7 +263,7 @@ func TestResolveOpenAITargetDeterministic(t *testing.T) {
 		Routing: core.RoutingConfig{
 			DefaultOpenAIProvider: "openai",
 			Providers: map[string]core.ProviderConfig{
-				"open": {BaseURL: "https://api.open.example.com"},
+				"open":   {BaseURL: "https://api.open.example.com"},
 				"openai": {BaseURL: "https://api.openai.com"},
 			},
 		},

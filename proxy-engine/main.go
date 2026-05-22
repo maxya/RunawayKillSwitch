@@ -379,7 +379,9 @@ func (s *ProxyServer) serveUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(dashboardHTML)
+	if _, err := w.Write(dashboardHTML); err != nil {
+		slog.Error("failed to write dashboard response", "error", err)
+	}
 }
 
 func (s *ProxyServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
@@ -392,10 +394,14 @@ func (s *ProxyServer) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	summary, err := s.metrics.GetMetricsSummary(r.Context())
 	if err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "redis unavailable"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "redis unavailable"}); encErr != nil {
+			slog.Error("failed to write error response", "error", encErr)
+		}
 		return
 	}
-	json.NewEncoder(w).Encode(summary)
+	if encErr := json.NewEncoder(w).Encode(summary); encErr != nil {
+		slog.Error("failed to write status response", "error", encErr)
+	}
 }
 
 func (s *ProxyServer) handleAPIReset(w http.ResponseWriter, r *http.Request) {
@@ -408,15 +414,21 @@ func (s *ProxyServer) handleAPIReset(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(map[string]string{"error": "POST required"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "POST required"}); encErr != nil {
+			slog.Error("failed to write error response", "error", encErr)
+		}
 		return
 	}
 	if err := s.metrics.ResetCircuitBreaker(r.Context()); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "reset failed"})
+		if encErr := json.NewEncoder(w).Encode(map[string]string{"error": "reset failed"}); encErr != nil {
+			slog.Error("failed to write error response", "error", encErr)
+		}
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"status": "reset", "message": "Circuit breaker reset successfully"})
+	if encErr := json.NewEncoder(w).Encode(map[string]string{"status": "reset", "message": "Circuit breaker reset successfully"}); encErr != nil {
+		slog.Error("failed to write reset response", "error", encErr)
+	}
 }
 
 func (s *ProxyServer) fireWebhook(reason string) {
@@ -445,13 +457,15 @@ func (s *ProxyServer) fireWebhook(reason string) {
 func writeBlockedResponse(w http.ResponseWriter, reason string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusPaymentRequired)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]string{
 			"type":    "circuit_breaker_active",
 			"message": "RunawayKillSwitch: " + reason,
 			"proxy":   "runaway-killswitch",
 		},
-	})
+	}); err != nil {
+		slog.Error("failed to write blocked response", "error", err)
+	}
 }
 
 // computePromptHash hashes the messages array from the request body.
