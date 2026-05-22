@@ -438,7 +438,7 @@ func (s *ProxyServer) fireWebhook(reason string) {
 	if !s.config.Notifications.Webhook.Enabled || s.config.Notifications.Webhook.URL == "" {
 		return
 	}
-	payload := map[string]interface{}{
+	payload := map[string]any{
 		"content": fmt.Sprintf("🚨 **RunawayKillSwitch TRIGGERED**\n**Reason:** %s\n**Time:** %s",
 			reason, time.Now().Format(time.RFC3339)),
 	}
